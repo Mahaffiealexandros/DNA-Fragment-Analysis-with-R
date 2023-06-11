@@ -1,0 +1,86 @@
+# DNA Fragment Analysis with R by Albert Mahaffey
+
+This R script performs a series of statistical tests and visualizations on DNA fragment data. It takes in a CSV file of reference data and a CSV file of sample data, each consisting of DNA fragment information from a gel image analysis. 
+
+The program estimates the fragment sizes based on a DNA ladder, applies Z-score normalization to the calibrated volumes, and then compares the sample data to the reference data using ANOVA, outputting a p-value that can be used to determine if the sample matches the reference.
+
+The script also generates several types of plots for visualizing the data, including histograms, boxplots, scatter plots, heatmaps, correlation plots, and line plots.
+
+## Code
+
+```R
+# Import necessary libraries
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stats)
+library(ggplot2)
+library(viridis) # For additional color palettes
+library(pheatmap)
+library(corrplot)
+
+# Load reference and sample data
+ref_data <- read_csv('reference.csv')
+sample_data <- read_csv('sample.csv')
+
+# Extract the ladder from reference data
+ladder <- ref_data[ref_data$Lane == 1,]
+
+# Apply Z-score normalization to volume data
+ref_data$Cal.Volume <- scale(ref_data$Cal.Volume)
+sample_data$Cal.Volume <- scale(sample_data$Cal.Volume)
+
+# Function to estimate the fragment sizes based on the reference ladder
+estimate_fragment_sizes <- function(ladder_sizes, ladder_rf, band_rf) {
+  # Fit a linear regression model to estimate the size-position relationship
+  fit <- lm(ladder_sizes ~ ladder_rf)
+  
+  # Predict fragment sizes based on the model
+  fragment_sizes <- predict(fit, newdata = data.frame(ladder_rf = band_rf))
+
+  return(fragment_sizes)
+}
+
+# Estimate fragment sizes for the reference and sample bands
+ref_fragment_sizes <- estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, ref_data$Rf)
+sample_fragment_sizes <- estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, sample_data$Rf)
+
+# Create a data frame for ANOVA
+anova_df <- data.frame(
+  Cal.Volume = c(ref_data$Cal.Volume, sample_data$Cal.Volume),
+  Group = factor(c(rep('Reference', length(ref_data$Cal.Volume)), rep('Sample', length(sample_data$Cal.Volume))))
+)
+
+# ANOVA
+fit <- aov(Cal.Volume ~ Group, data = anova_df)
+anova_summary <- summary(fit)
+
+# Check p-value
+p_value <- anova_summary[[1]]$"Pr(>F)"[1]
+if(p_value > 0.05){
+  print(paste("\nSample matches the reference (P-value: ", round(p_value, 4), ")."))
+} else {
+  print(paste("\nSample does not match the reference (P-value: ", round(p_value, 4), ")."))
+}
+
+# Tukey's HSD test
+tukey <- TukeyHSD(fit)
+print(paste("\nTukey's HSD Test Results: \n"))
+print(tukey)
+
+# Create a matrix for heatmap
+heatmap_data <- as.matrix(ref_data[, c("Lane", "Band", "Cal.Volume")])
+rownames(heatmap_data) <- paste("Lane", ref_data$Lane, "Band", ref_data$Band)
+
+# Create heatmap
+pheatmap(heatmap_data, color = viridis(256), main = "Heatmap of Calibrated Volume")
+
+# Correlation plot
+corrplot(cor(ref_data[,c("Rf", "Cal.Volume")]), method = "square")
+
+# Line plot
+ggplot(ref_data, aes(x = Rf, y = Cal.Volume)) +
+  geom_line(aes(color = factor(Band))) +
+  labs(title = "Line Plot of Rf vs Cal.Volume", x = "Rf", y = "Cal.Volume") +
+  theme_minimal() +
+  scale_color_viridis(discrete = TRUE, option = "D")
