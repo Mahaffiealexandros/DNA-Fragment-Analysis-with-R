@@ -1,0 +1,143 @@
+
+
+
+# Import necessary libraries
+library(pheatmap)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stats)
+library(ggplot2)
+library(corrplot)
+library(viridis) # For additional color palettes
+library(effsize) # For effect size calculation
+library(pwr) # For power analysis
+library(BayesFactor) # For Bayesian analysis
+
+# Function to estimate the fragment sizes based on the reference ladder
+estimate_fragment_sizes <- function(ladder_sizes, ladder_rf, band_rf) {
+  # Fit a linear regression model to estimate the size-position relationship
+  fit <- lm(ladder_sizes ~ ladder_rf)
+  
+  # Predict fragment sizes based on the model
+  fragment_sizes <- predict(fit, newdata = data.frame(ladder_rf = band_rf))
+  
+  return(fragment_sizes)
+}
+
+# Function to perform ANOVA and calculate p-value for a specific sample band
+perform_anova <- function(reference_data, sample_data) {
+  # Create a data frame for ANOVA
+  anova_df <- data.frame(
+    FragmentSize = c(reference_data$FragmentSize, sample_data$FragmentSize),
+    Group = factor(c(rep('Reference', nrow(reference_data)), rep('Sample', nrow(sample_data))))
+  )
+  
+  # Perform ANOVA
+  fit <- aov(FragmentSize ~ Group, data = anova_df)
+  
+  # Get the ANOVA table
+  anova_table <- summary(fit)
+  
+  # Get the p-value from the ANOVA table
+  p_value <- anova_table[[1]]$"Pr(>F)"[1]
+  
+  # Calculate Cohen's d for effect size
+  cohen_d <- cohen.d(anova_df$FragmentSize, anova_df$Group)
+  
+  # Perform power analysis
+  power_analysis <- pwr.t.test(n = nrow(anova_df), d = cohen_d$estimate, sig.level = 0.05, power = NULL, alternative = "two.sided")
+  
+  # Return the p-value, ANOVA table, effect size and power analysis
+  return(list(p_value = p_value, anova_table = anova_table, cohen_d = cohen_d, power_analysis = power_analysis))
+}
+
+# Load reference and sample data
+reference_data <- read_csv('/Users/albertmahaffey/Downloads/0323_master_ref.csv')
+sample_data <- read_csv('/Users/albertmahaffey/Downloads/0339_master_sample.csv')
+
+# Extract the ladder from reference data
+ladder <- reference_data[reference_data$Lane == 1, ]
+
+# Generate fragment size data for each primer set in the reference data
+reference_data <- reference_data %>%
+  group_by(Lane, Band) %>%
+  mutate(FragmentSize = estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, Rf))
+
+# Generate fragment size data for each primer set in the sample data
+sample_data <- sample_data %>%
+  group_by(Lane, Band) %>%
+  mutate(FragmentSize = estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, Rf))
+
+# Perform ANOVA and calculate p-value for comparing the reference to a new sample
+result_reference_sample <- perform_anova(reference_data, sample_data)
+
+# Print the p-value, ANOVA table, effect size and power
+print(paste("P-value for comparing the reference to the new sample:", round(result_reference_sample$p_value, 4)))
+print(result_reference_sample$anova_table)
+print(paste("Cohen's d for comparing the reference to the new sample:", round(result_reference_sample$cohen_d$estimate, 4)))
+print(paste("Power for comparing the reference to the new sample:", round(result_reference_sample$power_analysis$power, 4)))
+
+# Comparison scenarios
+comparison_scenarios <- list(
+  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 BOX1AR"),
+  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 ERIC 1R + 2"),
+  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 Bc-Rep-1 + 2"),
+  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 BOX1AR")
+)
+
+# Perform ANOVA and calculate p-value for each comparison scenario
+for (scenario in comparison_scenarios) {
+  reference <- scenario$reference
+  sample <- scenario$sample
+  
+  reference_data_scenario <- reference_data[reference_data$Sample == reference, ]
+  sample_data_scenario <- sample_data[sample_data$Sample == sample, ]
+  
+  result_scenario <- perform_anova(reference_data_scenario, sample_data_scenario)
+  
+  print(paste("P-value for comparing", reference, "reference to", sample, "sample:", round(result_scenario$p_value, 4)))
+  print(result_scenario$anova_table)
+  print(paste("Cohen's d for comparing", reference, "reference to", sample, "sample:", round(result_scenario$cohen_d$estimate, 4)))
+  print(paste("Power for comparing", reference, "reference to", sample, "sample:", round(result_scenario$power_analysis$power, 4)))
+}
+
+
+
+# Boxplots for comparing FragmentSizes between different samples
+ggplot(reference_data, aes(x = as.factor(Band), y = FragmentSize, fill = as.factor(Band))) +
+  geom_boxplot() +
+  labs(title = "Boxplots of Fragment Sizes", x = "Band", y = "Fragment Size") +
+  theme_minimal()
+
+# Histogram for observing the distribution of FragmentSizes within a sample
+ggplot(reference_data, aes(x = FragmentSize)) +
+  geom_histogram(binwidth = 1, fill = 'blue', alpha = 0.5) +
+  labs(title = "Histogram of Fragment Sizes", x = "Fragment Size", y = "Frequency") +
+  theme_minimal()
+
+# QQ-plot for checking normality
+qqnorm(reference_data$FragmentSize, main = "QQ Plot")
+qqline(reference_data$FragmentSize, col = "steelblue", lwd = 2)
+
+# Perform plots for each comparison scenario
+for (scenario in comparison_scenarios) {
+  # ...
+  
+  # Boxplots for comparing FragmentSizes between reference and sample
+  ggplot(rbind(reference_data_scenario, sample_data_scenario), aes(x = Group, y = FragmentSize, fill = Group)) +
+    geom_boxplot() +
+    labs(title = paste("Boxplots of Fragment Sizes for", reference, "and", sample), x = "Group", y = "Fragment Size") +
+    theme_minimal()
+  
+  # Histogram for observing the distribution of FragmentSizes within a sample
+  ggplot(sample_data_scenario, aes(x = FragmentSize)) +
+    geom_histogram(binwidth = 1, fill = 'blue', alpha = 0.5) +
+    labs(title = paste("Histogram of Fragment Sizes for", sample), x = "Fragment Size", y = "Frequency") +
+    theme_minimal()
+  
+  # QQ-plot for checking normality
+  qqnorm(sample_data_scenario$FragmentSize, main = paste("QQ Plot for", sample))
+  qqline(sample_data_scenario$FragmentSize, col = "steelblue", lwd = 2)
+}
+
