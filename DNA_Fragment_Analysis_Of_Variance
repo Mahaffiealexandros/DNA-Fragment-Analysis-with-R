@@ -1,3 +1,31 @@
+# Comparative Analysis of Gel Electrophoresis Data in R by Albert Mahaffey
+
+# This GitHub repository houses an R project developed to conduct detailed comparative analyses of gel electrophoresis data. The project implements various statistical analyses to assess the differences between sample and reference datasets. 
+
+## Overview 
+
+#The main tasks carried out by this script include:
+
+#1. **Data Import and Preprocessing**: Reads the reference and sample CSV data, and imputes missing values with zeroes. Quality score columns for 'Rf', 'Cal.Volume', 'Raw Volume', and 'MW' are added to the data.
+
+#2. **Fragment Size Estimation**: For each primer set, the fragment size data is generated based on the reference data. This is achieved using a linear regression model to estimate the size-position relationship.
+
+#3. **Comparison Scenarios Setup**: Several comparison scenarios between reference and sample sets are created to perform the analyses on.
+
+#4. **Analysis of Variance (ANOVA)**: This test is used to compare the means of the fragment sizes between the reference and sample datasets for each scenario. The results, including the p-value, ANOVA table, and confidence intervals, are printed out.
+
+#5. **Multiple Testing Correction**: The p-values obtained from the multiple comparisons are corrected using the Bonferroni method and six other methods.
+
+#6. **Data Visualization**: Bar and dot plots are created to display the comparison of p-values across different scenarios. Further, the mean fragment size and standard deviation for each sample are visualized. Lastly, the comparison of adjusted p-values using different methods is plotted for easy comparison.
+
+#The R libraries utilized in this project include pheatmap, readr, dplyr, tidyr, stats, ggplot2, corrplot, viridis, and p.adjust.methods.
+
+#To use this project, replace the file paths with the location of your data files. You may need to modify the comparison scenarios or analysis methods to suit your specific requirements. 
+
+#Please ensure you have installed all necessary R packages before running the scripts.
+
+
+
 
 
 
@@ -10,10 +38,34 @@ library(stats)
 library(ggplot2)
 library(corrplot)
 library(viridis) # For additional color palettes
-library(effsize) # For effect size calculation
-library(pwr) # For power analysis
-library(BayesFactor) # For Bayesian analysis
+library(p.adjust.methods) # For multiple testing correction
 
+# Load reference and sample data
+reference_data <- read_csv('/Users/albertmahaffey/Downloads/1515_Reference_gel.csv')
+sample_data <- read_csv('/Users/albertmahaffey/Downloads/1515_sample_gel.csv')
+
+# Replace missing values in reference_data and sample_data
+reference_data[is.na(reference_data)] <- 0
+sample_data[is.na(sample_data)] <- 0
+
+# Add quality score columns for 'Rf', 'Cal.Volume', 'Raw Volume' and 'MW'
+reference_data <- reference_data %>% 
+  mutate(
+    Rf_score = ntile(Rf, 5),
+    Cal_Volume_score = ntile(`Cal.Volume`, 5),
+    Raw_Volume_score = ntile(`Raw Volume`, 5),
+    MW_score = ntile(MW, 5)
+  )
+
+sample_data <- sample_data %>% 
+  mutate(
+    Rf_score = ntile(Rf, 5),
+    Cal_Volume_score = ntile(`Cal.Volume`, 5),
+    Raw_Volume_score = ntile(`Raw Volume`, 5),
+    MW_score = ntile(MW, 5)
+  )
+
+# Functions are defined at the start to keep the code clean
 # Function to estimate the fragment sizes based on the reference ladder
 estimate_fragment_sizes <- function(ladder_sizes, ladder_rf, band_rf) {
   # Fit a linear regression model to estimate the size-position relationship
@@ -25,7 +77,7 @@ estimate_fragment_sizes <- function(ladder_sizes, ladder_rf, band_rf) {
   return(fragment_sizes)
 }
 
-# Function to perform ANOVA and calculate p-value for a specific sample band
+# Function to perform ANOVA and calculate p-value and confidence intervals for a specific sample band
 perform_anova <- function(reference_data, sample_data) {
   # Create a data frame for ANOVA
   anova_df <- data.frame(
@@ -42,19 +94,12 @@ perform_anova <- function(reference_data, sample_data) {
   # Get the p-value from the ANOVA table
   p_value <- anova_table[[1]]$"Pr(>F)"[1]
   
-  # Calculate Cohen's d for effect size
-  cohen_d <- cohen.d(anova_df$FragmentSize, anova_df$Group)
+  # Calculate confidence intervals
+  ci <- confint(fit)
   
-  # Perform power analysis
-  power_analysis <- pwr.t.test(n = nrow(anova_df), d = cohen_d$estimate, sig.level = 0.05, power = NULL, alternative = "two.sided")
-  
-  # Return the p-value, ANOVA table, effect size and power analysis
-  return(list(p_value = p_value, anova_table = anova_table, cohen_d = cohen_d, power_analysis = power_analysis))
+  # Return the p-value, ANOVA table and confidence intervals
+  return(list(p_value = p_value, anova_table = anova_table, ci = ci))
 }
-
-# Load reference and sample data
-reference_data <- read_csv('/Users/albertmahaffey/Downloads/0323_master_ref.csv')
-sample_data <- read_csv('/Users/albertmahaffey/Downloads/0339_master_sample.csv')
 
 # Extract the ladder from reference data
 ladder <- reference_data[reference_data$Lane == 1, ]
@@ -69,24 +114,22 @@ sample_data <- sample_data %>%
   group_by(Lane, Band) %>%
   mutate(FragmentSize = estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, Rf))
 
-# Perform ANOVA and calculate p-value for comparing the reference to a new sample
-result_reference_sample <- perform_anova(reference_data, sample_data)
-
-# Print the p-value, ANOVA table, effect size and power
-print(paste("P-value for comparing the reference to the new sample:", round(result_reference_sample$p_value, 4)))
-print(result_reference_sample$anova_table)
-print(paste("Cohen's d for comparing the reference to the new sample:", round(result_reference_sample$cohen_d$estimate, 4)))
-print(paste("Power for comparing the reference to the new sample:", round(result_reference_sample$power_analysis$power, 4)))
-
 # Comparison scenarios
 comparison_scenarios <- list(
-  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 BOX1AR"),
-  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 ERIC 1R + 2"),
-  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 Bc-Rep-1 + 2"),
-  list(reference = "Ba900 BOX1AR", sample = "Ba900 572 BOX1AR")
+  list(reference = "Ba900 w/ BOX1AR", sample = "Hp13 1017 w/ BOX1AR"),
+  list(reference = "Ba900 w/ Eric", sample = "Ba900 572 w/ Eric"),
+  list(reference = "Hp13 w/ BOX1AR", sample = "Hp13 1017 w/ BOX1AR"),
+  list(reference = "Hp13 w/ Eric", sample = "Hp13 1017 w/ Eric"),
+  list(reference = "Ba900 w/ BOX1AR", sample = "Hp13 1017 w/ BOX1AR"),
+  list(reference = "Ba900 w/ Eric", sample = "Hp13 1017 w/ Eric"),
+  list(reference = "Hp13 w/ BOX1AR", sample = "Ba900 572 w/BOX1AR"),
+  list(reference = "Hp13 w/ Eric", sample = "Ba900 572 w/ Eric")
+
 )
 
-# Perform ANOVA and calculate p-value for each comparison scenario
+p_values <- c()
+
+# Perform ANOVA and calculate p-value and confidence intervals for each comparison scenario
 for (scenario in comparison_scenarios) {
   reference <- scenario$reference
   sample <- scenario$sample
@@ -95,49 +138,90 @@ for (scenario in comparison_scenarios) {
   sample_data_scenario <- sample_data[sample_data$Sample == sample, ]
   
   result_scenario <- perform_anova(reference_data_scenario, sample_data_scenario)
+  p_value_scenario <- result_scenario$p_value
+  anova_table_scenario <- result_scenario$anova_table
+  ci_scenario <- result_scenario$ci
   
-  print(paste("P-value for comparing", reference, "reference to", sample, "sample:", round(result_scenario$p_value, 4)))
-  print(result_scenario$anova_table)
-  print(paste("Cohen's d for comparing", reference, "reference to", sample, "sample:", round(result_scenario$cohen_d$estimate, 4)))
-  print(paste("Power for comparing", reference, "reference to", sample, "sample:", round(result_scenario$power_analysis$power, 4)))
+  # Add the p-value to the list
+  p_values <- c(p_values, p_value_scenario)
+  
+  print(paste("P-value for comparing", reference, "reference to", sample, "sample:", round(p_value_scenario, 4)))
+  print(anova_table_scenario)
+  print(ci_scenario)
 }
 
+# Adjust the p-values for multiple testing using Bonferroni correction
+adjusted_p_values <- p.adjust(p_values, method = "bonferroni")
+print(paste("Adjusted p-values:", adjusted_p_values))
+
+# Create a data frame for the comparison scenarios and p-values
+comparison_data <- data.frame(
+  Comparison = unlist(lapply(comparison_scenarios, function(x) paste(x$reference, "vs", x$sample))),
+  p_value = adjusted_p_values
+)
+
+# Bar plot
+bar_plot <- ggplot(comparison_data, aes(x = Comparison, y = p_value)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Comparison of p-values", x = "Comparison", y = "p-value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Dot plot
+dot_plot <- ggplot(comparison_data, aes(x = Comparison, y = p_value)) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Comparison of p-values", x = "Comparison", y = "p-value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plots
+print(bar_plot)
+print(dot_plot)
+
+# Create a summary data frame for visualization
+summary_data <- rbind(
+  reference_data %>%
+    group_by(Sample) %>%
+    summarise(MeanFragmentSize = mean(FragmentSize), SD = sd(FragmentSize)),
+  sample_data %>%
+    group_by(Sample) %>%
+    summarise(MeanFragmentSize = mean(FragmentSize), SD = sd(FragmentSize))
+)
+
+# Plot the mean fragment size and SD for each sample
+ggplot(summary_data, aes(x = Sample, y = MeanFragmentSize, fill = Sample)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = MeanFragmentSize - SD, ymax = MeanFragmentSize + SD), width = 0.4, position = position_dodge(0.9)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Sample", y = "Mean Fragment Size (with SD)", fill = "Sample")
+
+# Adjust the p-values for multiple testing using different methods
+methods <- c("bonferroni", "holm", "hochberg", "hommel", "BH", "BY")
+adjusted_p_values <- lapply(methods, function(method) p.adjust(p_values, method = method))
+
+# Add method names to the adjusted p-values
+names(adjusted_p_values) <- methods
+
+# Create a data frame for the comparison scenarios, p-values and methods
+comparison_data <- do.call(rbind, lapply(names(adjusted_p_values), function(method) {
+  data.frame(
+    Method = method,
+    Comparison = unlist(lapply(comparison_scenarios, function(x) paste(x$reference, "vs", x$sample))),
+    p_value = adjusted_p_values[[method]]
+  )
+}))
+
+# Plot
+ggplot(comparison_data, aes(x = Comparison, y = p_value, fill = Method)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Comparison of p-values using different methods", x = "Comparison", y = "p-value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set1")
 
 
-# Boxplots for comparing FragmentSizes between different samples
-ggplot(reference_data, aes(x = as.factor(Band), y = FragmentSize, fill = as.factor(Band))) +
-  geom_boxplot() +
-  labs(title = "Boxplots of Fragment Sizes", x = "Band", y = "Fragment Size") +
-  theme_minimal()
-
-# Histogram for observing the distribution of FragmentSizes within a sample
-ggplot(reference_data, aes(x = FragmentSize)) +
-  geom_histogram(binwidth = 1, fill = 'blue', alpha = 0.5) +
-  labs(title = "Histogram of Fragment Sizes", x = "Fragment Size", y = "Frequency") +
-  theme_minimal()
-
-# QQ-plot for checking normality
-qqnorm(reference_data$FragmentSize, main = "QQ Plot")
-qqline(reference_data$FragmentSize, col = "steelblue", lwd = 2)
-
-# Perform plots for each comparison scenario
-for (scenario in comparison_scenarios) {
-  # ...
-  
-  # Boxplots for comparing FragmentSizes between reference and sample
-  ggplot(rbind(reference_data_scenario, sample_data_scenario), aes(x = Group, y = FragmentSize, fill = Group)) +
-    geom_boxplot() +
-    labs(title = paste("Boxplots of Fragment Sizes for", reference, "and", sample), x = "Group", y = "Fragment Size") +
-    theme_minimal()
-  
-  # Histogram for observing the distribution of FragmentSizes within a sample
-  ggplot(sample_data_scenario, aes(x = FragmentSize)) +
-    geom_histogram(binwidth = 1, fill = 'blue', alpha = 0.5) +
-    labs(title = paste("Histogram of Fragment Sizes for", sample), x = "Fragment Size", y = "Frequency") +
-    theme_minimal()
-  
-  # QQ-plot for checking normality
-  qqnorm(sample_data_scenario$FragmentSize, main = paste("QQ Plot for", sample))
-  qqline(sample_data_scenario$FragmentSize, col = "steelblue", lwd = 2)
-}
 
