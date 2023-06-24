@@ -1,35 +1,9 @@
-# Comparative Analysis of Gel Electrophoresis Data in R by Albert Mahaffey
-
-# This GitHub repository houses an R project developed to conduct detailed comparative analyses of gel electrophoresis data. The project implements various statistical analyses to assess the differences between sample and reference datasets. 
-
-## Overview 
-
-#The main tasks carried out by this script include:
-
-#1. **Data Import and Preprocessing**: Reads the reference and sample CSV data, and imputes missing values with zeroes. Quality score columns for 'Rf', 'Cal.Volume', 'Raw Volume', and 'MW' are added to the data.
-
-#2. **Fragment Size Estimation**: For each primer set, the fragment size data is generated based on the reference data. This is achieved using a linear regression model to estimate the size-position relationship.
-
-#3. **Comparison Scenarios Setup**: Several comparison scenarios between reference and sample sets are created to perform the analyses on.
-
-#4. **Analysis of Variance (ANOVA)**: This test is used to compare the means of the fragment sizes between the reference and sample datasets for each scenario. The results, including the p-value, ANOVA table, and confidence intervals, are printed out.
-
-#5. **Multiple Testing Correction**: The p-values obtained from the multiple comparisons are corrected using the Bonferroni method and six other methods.
-
-#6. **Data Visualization**: Bar and dot plots are created to display the comparison of p-values across different scenarios. Further, the mean fragment size and standard deviation for each sample are visualized. Lastly, the comparison of adjusted p-values using different methods is plotted for easy comparison.
-
-#The R libraries utilized in this project include pheatmap, readr, dplyr, tidyr, stats, ggplot2, corrplot, viridis, and p.adjust.methods.
-
-#To use this project, replace the file paths with the location of your data files. You may need to modify the comparison scenarios or analysis methods to suit your specific requirements. 
-
-#Please ensure you have installed all necessary R packages before running the scripts.
-
-
-
-
-
+# R script that provides an innovative approach to DNA Fragment Analysis. It utilizes Analysis of Variance (ANOVA) on DNA fragment size data. 
+# By leveraging R's computational and graphical capabilities, 
+# the script allows researchers to effectively process, analyze, and visually interpret complex genomic datasets.
 
 # Import necessary libraries
+library(dbscan)
 library(pheatmap)
 library(readr)
 library(dplyr)
@@ -222,6 +196,144 @@ ggplot(comparison_data, aes(x = Comparison, y = p_value, fill = Method)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_fill_brewer(palette = "Set1")
+
+# Function to calculate the Euclidean distance between two samples
+calc_distance <- function(sample1, sample2) {
+  sqrt(sum((sample1$FragmentSize - sample2$FragmentSize)^2))
+}
+
+# Calculate distances between each pair of samples
+samples <- unique(c(unique(reference_data$Sample), unique(sample_data$Sample)))
+distances <- matrix(nrow = length(samples), ncol = length(samples))
+rownames(distances) <- samples
+colnames(distances) <- samples
+for (i in 1:length(samples)) {
+  for (j in 1:length(samples)) {
+    sample1_data <- rbind(
+      reference_data[reference_data$Sample == samples[i], ],
+      sample_data[sample_data$Sample == samples[i], ]
+    )
+    sample2_data <- rbind(
+      reference_data[reference_data$Sample == samples[j], ],
+      sample_data[sample_data$Sample == samples[j], ]
+    )
+    distances[i, j] <- calc_distance(sample1_data, sample2_data)
+  }
+}
+
+# Convert the distance matrix to a 'dist' object
+distances <- as.dist(distances)
+
+# Create a hierarchical clustering dendrogram
+hc <- hclust(distances)
+plot(hc, hang = -1, main = "Hierarchical Clustering of Samples", xlab = "Sample", sub = "")
+
+# Scale and center the data
+data_for_clustering <- scale(summary_data$MeanFragmentSize)
+
+# k-means clustering
+set.seed(123)
+kmeans_result <- kmeans(data_for_clustering, centers = 3) # Modify centers as per your data
+summary_data$cluster_kmeans <- as.factor(kmeans_result$cluster)
+
+# DBSCAN clustering
+dbscan_result <- dbscan(data_for_clustering, eps = 0.5, minPts = 5) # Modify eps and minPts as per your data
+summary_data$cluster_dbscan <- as.factor(dbscan_result$cluster)
+
+# Hierarchical clustering
+dist_matrix <- dist(data_for_clustering) 
+hc_result <- hclust(dist_matrix, method = "average") # Modify the method as per your preference
+# Cut the dendrogram at k (e.g. k = 3) to get clusters
+summary_data$cluster_hc <- as.factor(cutree(hc_result, k = 3)) # Modify k as per your data
+
+# Visualizing clusters
+p1 <- ggplot(summary_data, aes(MeanFragmentSize, SD, color = cluster_kmeans)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  labs(title = "k-means Clustering")
+
+p2 <- ggplot(summary_data, aes(MeanFragmentSize, SD, color = cluster_dbscan)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  labs(title = "DBSCAN Clustering")
+
+p3 <- ggplot(summary_data, aes(MeanFragmentSize, SD, color = cluster_hc)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  labs(title = "Hierarchical Clustering")
+
+# To visualize dendrogram from hierarchical clustering
+plot(hc_result, cex = 0.6)
+rect.hclust(hc_result, k = 3, border = 2:4) # Modify k as per your data
+
+# To visualize all plots side by side
+library(gridExtra)
+grid.arrange(p1, p2, p3, nrow = 1)
+
+# Adjust the p-values for multiple testing using the Benjamini-Hochberg procedure
+adjusted_p_values_BH <- p.adjust(p_values, method = "BH")
+
+# Add adjusted p-values to the comparison_data dataframe
+comparison_data$AdjustedPValue_BH <- adjusted_p_values_BH
+
+print(comparison_data)
+
+# Generate a dendrogram based on the adjusted p-values
+dist_adjusted_p_values_BH <- dist(adjusted_p_values_BH)
+hc_adjusted_p_values_BH <- hclust(dist_adjusted_p_values_BH)
+plot(hc_adjusted_p_values_BH, main = "Dendrogram based on adjusted p-values")
+
+# Scatter plot of raw p-values versus adjusted p-values, colored by comparison
+ggplot(comparison_data, aes(x = p_value, y = AdjustedPValue_BH, color = Comparison)) +
+  geom_point() +
+  labs(title = "Raw P-Value vs Adjusted P-Value", x = "Raw P-Value", y = "Adjusted P-Value (Benjamini-Hochberg)") +
+  theme_minimal()
+
+# Boxplot of adjusted p-values by comparison
+ggplot(comparison_data, aes(x = Comparison, y = AdjustedPValue_BH, fill = Comparison)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Adjusted P-Values by Comparison", x = "Comparison", y = "Adjusted P-Value (Benjamini-Hochberg)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Heatmap of adjusted p-values
+adjusted_p_values_BH_matrix <- matrix(adjusted_p_values_BH, nrow = sqrt(length(adjusted_p_values_BH)), ncol = sqrt(length(adjusted_p_values_BH)))
+colnames(adjusted_p_values_BH_matrix) <- comparison_data$Comparison[1:sqrt(length(adjusted_p_values_BH))]
+rownames(adjusted_p_values_BH_matrix) <- comparison_data$Comparison[1:sqrt(length(adjusted_p_values_BH))]
+pheatmap(adjusted_p_values_BH_matrix, main = "Heatmap of Adjusted P-Values")
+
+# Create a data frame for the comparison scenarios and p-values
+comparison_data_BH <- data.frame(
+  Comparison = unlist(lapply(comparison_scenarios, function(x) paste(x$reference, "vs", x$sample))),
+  p_value = adjusted_p_values_BH
+)
+
+# Bar plot
+bar_plot_BH <- ggplot(comparison_data_BH, aes(x = Comparison, y = p_value)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Comparison of p-values (Benjamini-Hochberg adjusted)", x = "Comparison", y = "p-value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Dot plot
+dot_plot_BH <- ggplot(comparison_data_BH, aes(x = Comparison, y = p_value)) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Comparison of p-values (Benjamini-Hochberg adjusted)", x = "Comparison", y = "p-value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plots
+print(bar_plot_BH)
+print(dot_plot_BH)
+
+# Add adjusted p-values to the summary data
+summary_data <- summary_data %>%
+  mutate(AdjustedPValue = p.adjust(p_value, method = "BH"))
+
+# Generate a dendrogram based on the hierarchical clustering of the mean fragment sizes
+hclust_obj <- hclust(dist(summary_data$MeanFragmentSize))
+plot(hclust_obj, main = "Dendrogram of Mean Fragment Sizes")
+
+
 
 
 
