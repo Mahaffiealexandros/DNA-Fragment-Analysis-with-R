@@ -1,0 +1,124 @@
+
+```r
+# Import necessary libraries
+library(pheatmap)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stats)
+library(ggplot2)
+library(corrplot)
+library(viridis) # For additional color palettes
+
+# Function to estimate the fragment sizes based on the reference ladder
+estimate_fragment_sizes <- function(ladder_sizes, ladder_rf, band_rf) {
+  # Fit a linear regression model to estimate the size-position relationship
+  fit <- lm(ladder_sizes ~ ladder_rf)
+  
+  # Predict fragment sizes based on the model
+  fragment_sizes <- predict(fit, newdata = data.frame(ladder_rf = band_rf))
+  
+  return(fragment_sizes)
+}
+
+# Function to perform ANOVA and calculate p-value and confidence intervals for a specific sample band
+perform_anova <- function(reference_data, sample_data) {
+  # Create a data frame for ANOVA
+  anova_df <- data.frame(
+    FragmentSize = c(reference_data$FragmentSize, sample_data$FragmentSize),
+    Group = factor(c(rep('Reference', nrow(reference_data)), rep('Sample', nrow(sample_data))))
+  )
+  
+  # Perform ANOVA
+  fit <- aov(FragmentSize ~ Group, data = anova_df)
+  
+  # Get the ANOVA table
+  anova_table <- summary(fit)
+  
+  # Get the p-value from the ANOVA table
+  p_value <- anova_table[[1]]$"Pr(>F)"[1]
+  
+  # Calculate confidence intervals
+  ci <- confint(fit)
+  
+  # Return the p-value, ANOVA table and confidence intervals
+  return(list(p_value = p_value, anova_table = anova_table, ci = ci))
+}
+
+# Function to calculate matching score based on FragmentSize
+calculate_matching_score <- function(reference_data, sample_data) {
+  # Merge the reference and sample data
+  merged_data <- merge(reference_data, sample_data, by = c("Lane", "Band"), suffixes = c("_ref", "_sample"))
+  
+  # Calculate the matching score as the absolute difference in FragmentSize
+  merged_data$MatchingScore <- abs(merged_data$FragmentSize_ref - merged_data$FragmentSize_sample)
+  
+  return(merged_data)
+}
+
+# Function to create a bar plot for matching scores
+create_matching_scores_plot <- function(merged_data_scenario, reference, sample) {
+  # Create a data frame for the matching scores
+  matching_scores_data <- data.frame(
+    Band = merged_data_scenario$Band,
+    MatchingScore = merged_data_scenario$MatchingScore
+  )
+  
+  # Bar plot for matching scores
+  matching_scores_plot <- ggplot(matching_scores_data, aes(x = Band, y = MatchingScore)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    labs(title = paste("Matching scores for", reference, "vs", sample), x = "Band", y = "Matching Score") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  return(matching_scores_plot)
+}
+
+# Load reference, sample, and ladder data
+# Replace these paths with the paths to your new dataset files
+reference_data <- read_csv('/Users/albertmahaffey/Downloads/1515_Reference_gel (1).csv')
+sample_data <- read_csv('/Users/albertmahaffey/Downloads/1515_sample_gel (1).csv')
+ladder_data <- read_csv('/Users/albertmahaffey/Downloads/Ladder.csv')
+
+# Extract the ladder from ladder data
+ladder <- ladder_data[ladder_data$Lane == 1, ]
+
+# Generate fragment size data for each primer set in the reference data
+reference_data <- reference_data %>%
+  group_by(Lane, Band) %>%
+  mutate(FragmentSize = estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, Rf))
+
+# Generate fragment size data for each primer set in the sample data
+sample_data <- sample_data %>%
+  group_by(Lane, Band) %>%
+  mutate(FragmentSize = estimate_fragment_sizes(ladder$Cal.Volume, ladder$Rf, Rf))
+
+# Comparison scenarios
+comparison_scenarios <- list(
+  list(reference = "Ba900 w/ BOX1AR", sample = "Ba900 572 w/BOX1AR"),
+  list(reference = "Ba900 w/ Eric", sample = "Ba900 572 w/ Eric"),
+  list(reference = "Hp13 w/ BOX1AR", sample = "Hp13 1017 w/ BOX1AR"),
+  list(reference = "Hp13 w/ Eric", sample = "Hp13 1017 w/ Eric"),
+  list(reference = "Ba900 w/ BOX1AR", sample = "Hp13 1017 w/ BOX1AR"),
+  list(reference = "Ba900 w/ Eric", sample = "Hp13 1017 w/ Eric"),
+  list(reference = "Hp13 w/ BOX1AR", sample = "Ba900 572 w/BOX1AR"),
+  list(reference = "Hp13 w/ Eric", sample = "Ba900 572 w/ Eric")
+)
+
+# Calculate matching score for each comparison scenario
+for (scenario in comparison_scenarios) {
+  reference <- scenario$reference
+  sample <- scenario$sample
+  
+  reference_data_scenario <- reference_data[reference_data$Sample == reference, ]
+  sample_data_scenario <- sample_data[sample_data$Sample == sample, ]
+  
+  merged_data_scenario <- calculate_matching_score(reference_data_scenario, sample_data_scenario)
+  
+  print(paste("Matching scores for", reference, "reference vs", sample, "sample:"))
+  print(merged_data_scenario$MatchingScore)
+  
+  # Create and display the plot
+  matching_scores_plot <- create_matching_scores_plot(merged_data_scenario, reference, sample)
+  print(matching_scores_plot)
+}
